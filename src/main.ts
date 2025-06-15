@@ -41,6 +41,7 @@ app.post(
         filename,
         req.file.buffer,
       ]);
+      console.log(`uploaded ${filename} as ${photo_id}`);
       res.status(201).json({ photo_id });
       return;
     } catch (error) {
@@ -52,29 +53,30 @@ app.post(
 
 function make_single_trans(trans: string): (img: sharp.Sharp) => void {
   {
-    const m = trans.match(/^r(\d+)$/);
+    const m = trans.match(/^r(.*)$/);
     if (m) {
-      return (img) => img.rotate(parseInt(m[1], 10));
+      const r = parseFloat(m[1]);
+      return (img) => img.rotate(r);
     }
   }
   {
-    const m = trans.match(/^c(\d+)x(\d+)$/);
+    const m = trans.match(/^c(.+)x(.+)$/);
     if (m) {
-      const w = parseInt(m[1], 10);
-      const h = parseInt(m[2], 10);
+      const w = parseFloat(m[1]);
+      const h = parseFloat(m[2]);
       return (img) => img.resize({ width: w, height: h, fit: "cover" });
     }
   }
   {
-    const m = trans.match(/^e(\d+)x(\d+)-(\d+)x(\d+)$/);
+    const m = trans.match(/^e(.+),(.+),(.+)x(.+)$/);
     if (m) {
-      const x1 = parseInt(m[1]);
-      const y1 = parseInt(m[2]);
-      const x2 = parseInt(m[3]);
-      const y2 = parseInt(m[4]);
-      const width = x2 - x1;
-      const height = y2 - y1;
-      return (img) => img.extract({ width, height, left: x1, top: y1 });
+      const left = parseFloat(m[1]);
+      const top = parseFloat(m[2]);
+      const width = parseFloat(m[3]);
+      const height = parseFloat(m[4]);
+      return (img) => {
+        img.extract({ left, top, width, height });
+      };
     }
   }
   throw new Error(`invalid transformer ${trans}`);
@@ -106,13 +108,18 @@ app.get("/photos/:photo_desc", async (req, res) => {
     res.status(400).send("invalid request");
     return;
   }
-  const parts = photo_desc.split(".");
-  if (parts.length < 2) {
+  console.log(`http://localhost/photos/${photo_desc}`);
+  const file_and_ext = photo_desc.match(/^(.+)\.([^.]+)$/);
+  if (!file_and_ext) {
     res.status(400).send("invalid photo");
     return;
   }
-  const [photo_id, ...ops] = parts;
-  const [extension] = ops.splice(-1);
+  const [_, file_and_trans_str, extension] = file_and_ext;
+  const [photo_id, ...ops] = file_and_trans_str.split("_");
+  if (!photo_id) {
+    res.status(400).send("invalid photo");
+    return;
+  }
   const extension_type = supported_extensions[extension];
   if (!extension_type) {
     res.status(400).send(`unsupported type ${extension}`);
@@ -129,7 +136,7 @@ app.get("/photos/:photo_desc", async (req, res) => {
     res.status(404).send("not found");
   }
   const image_buffer = out.rows[0].data;
-  const img = sharp(image_buffer);
+  const img = sharp(image_buffer).rotate();
   transformation.f(img);
   img.toFormat(extension_type);
   res.type(extension_type);
